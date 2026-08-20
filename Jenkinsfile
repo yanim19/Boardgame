@@ -46,16 +46,22 @@ pipeline {
             }
         }
 
-        stage('Trivy Scan') {
-            steps {
-                sh """
-                trivy image --severity HIGH,CRITICAL \
-                --format table \
-                -o trivy-report.txt \
-                ${DOCKER_IMAGE}:${IMAGE_TAG}
-                """
-            }
-        }
+       	stage('Trivy Scan') {
+    	    environment {
+        	TMPDIR = "/home/ranim/trivy-tmp"
+    	    }
+    	    steps {
+        	sh 'mkdir -p $TMPDIR'
+        	sh """
+        	trivy image --severity HIGH,CRITICAL \
+        	--cache-dir /home/ranim/trivy-cache \
+        	--timeout 15m \
+        	--format table \
+        	-o trivy-report.txt \
+        	${DOCKER_IMAGE}:${IMAGE_TAG}
+        	"""	
+    	    }	
+	}
 
         stage('Push to Nexus') {
             steps {
