@@ -1,4 +1,4 @@
-pipeline {
+pxipeline {
     agent any
 
     tools {
@@ -35,7 +35,11 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
-                    sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar'
+                    sh '''
+                    mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar \
+                      -Dsonar.projectKey=Boardgame \
+                      -Dsonar.projectName=Boardgame
+                    '''
                 }
             }
         }
@@ -46,22 +50,22 @@ pipeline {
             }
         }
 
-       	stage('Trivy Scan') {
-    	    environment {
-        	TMPDIR = "${WORKSPACE}/trivy-tmp"
-    	    }
-    	    steps {
-        	sh 'mkdir -p $TMPDIR'
-        	sh """
-        	trivy image --severity HIGH,CRITICAL \
-        	--cache-dir ${WORKSPACE}/trivy-cache \
-        	--timeout 15m \
-        	--format table \
-        	-o trivy-report.txt \
-        	${DOCKER_IMAGE}:${IMAGE_TAG}
-        	"""	
-    	    }	
-	}
+        stage('Trivy Scan') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
+            steps {
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy image --severity HIGH,CRITICAL \
+                --cache-dir ${WORKSPACE}/trivy-cache \
+                --timeout 15m \
+                --format table \
+                -o trivy-report.txt \
+                ${DOCKER_IMAGE}:${IMAGE_TAG}
+                """
+            }
+        }
 
         stage('Push to Nexus') {
             steps {
