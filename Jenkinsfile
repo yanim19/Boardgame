@@ -1,10 +1,11 @@
 pipeline {
     agent any
 
-    tools{
-	maven 'maven3'
-	jdk 'jdk17'
-    }	    
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
     environment {
         DOCKER_IMAGE = 'boardgame'
         IMAGE_TAG = "${BUILD_NUMBER}"
@@ -12,110 +13,101 @@ pipeline {
     }
 
     stages {
-        stage('1. Code Checkout') {
+
+        stage('1. GitHub Checkout') {
             steps {
-                cleanWs()
                 checkout scm
             }
         }
 
-        stage('2. Maven Compile') {
+        stage('2. Maven Build') {
             steps {
-                // Étape essentielle avant les scans : compilation du code
-                sh 'mvn clean compile'
+                sh 'mvn compile'
+                sh 'mvn test'
+                sh 'mvn package'
             }
         }
 
-        stage('3. Trivy Scan') {
-    	    environment {
-        	TMPDIR = "${WORKSPACE}/trivy-tmp"
-    	    }	
+        stage('3. Trivy FS Scan') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
             steps {
-        	sh 'mkdir -p $TMPDIR'
-        	sh """
-        	trivy image --severity HIGH,CRITICAL \
-        	--cache-dir /var/lib/jenkins/trivy-cache \
-        	--timeout 15m \
-        	--format table \
-        	-o trivy-report.txt \
-        	${DOCKER_IMAGE}:${IMAGE_TAG}
-        	"""
-    	    }
-	}	
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy fs --severity HIGH,CRITICAL \
+                --cache-dir /var/lib/jenkins/trivy-cache \
+                --timeout 15m \
+                --format table \
+                -o trivy-fs-report.txt \
+                .
+                """
+            }
+        }
 
         stage('4. SonarQube Analysis') {
             steps {
-                // Exécuté uniquement si Trivy a validé la sécurité du projet
-                withSonarQubeEnv('SonarQube-Server') {
-                    sh "${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=my-devsecops-app \
-                        -Dsonar.sources=. \
-                        -Dsonar.java.binaries=." 
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                    mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar \
+                      -Dsonar.projectKey=Boardgame \
+                      -Dsonar.projectName=Boardgame
+                    '''
                 }
             }
         }
 
-        stage('5. Quality Gate') {
+        stage('5. Maven Package') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                sh 'mvn package'
+            }
+        }
+
+        stage('6. Nexus Repo Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    echo \$NEXUS_PASS | docker login ${NEXUS_REGISTRY} -u \$NEXUS_USER --password-stdin
+                    docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    """
                 }
             }
         }
 
-        stage('6. Maven Package') {
+        stage('7. Docker Build') {
             steps {
-                // Génération du livrable final (JAR/WAR)
-                sh 'mvn package -DskipTests'
+                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
             }
         }
 
-        stage('7. Push Artifact to Nexus') {
+        stage('8. Trivy Image Scan') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
             steps {
-                nexusArtifactUploader(
-                    nexusVersion: 'nexus3',
-                    protocol: 'http',
-                    nexusUrl: "${NEXUS_URL}",
-                    groupId: 'com.example',
-                    version: "${IMAGE_TAG}",
-                    repository: 'maven-releases',
-                    credentialsId: "${CREDENTIALS_ID}",
-                    artifacts: [[artifactId: "${IMAGE_NAME}", file: 'target/my-app.war', type: 'war']]
-                )
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy image --severity HIGH,CRITICAL \
+                --cache-dir /var/lib/jenkins/trivy-cache \
+                --timeout 15m \
+                --format table \
+                -o trivy-image-report.txt \
+                ${DOCKER_IMAGE}:${IMAGE_TAG}
+                """
             }
         }
 
-        stage('8. Build & Push Docker Image') {
+        stage('9. Docker Tag') {
             steps {
-                script {
-                    // Construction de l'image contenant le fichier .war
-                    dockerImage = docker.build("${FULL_IMAGE_PATH}")
-                    
-                    // Envoi vers le registre privé Nexus
-                    docker.withRegistry("http://${DOCKER_REGISTRY}", "${CREDENTIALS_ID}") {
-                        dockerImage.push()
-                    }
-                }
+                sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
             }
         }
     }
 
     post {
         always {
-            cleanWs() // Nettoyage de l'espace de travail
-        }
-        success {
-            // Notification en cas de succès général
-            slackSend channel: "${SLACK_CHANNEL}", color: '#00FF00', message: "SUCCESS: Le pipeline ${BUILD_NUMBER} de ${JOB_NAME} s'est terminé avec succès !"
-        }
-        failure {
-            // Notification immédiate par Email et Slack en cas d'échec (Trivy, Sonar, Nexus...)
-            mail to: "${NOTIF_EMAIL}",
-                 subject: "ÉCHEC Pipeline Jenkins : ${JOB_NAME} - Build #${BUILD_NUMBER}",
-                 body: "Le pipeline a échoué. Veuillez vérifier les logs de la console Jenkins : ${BUILD_URL}"
-                 
-            slackSend channel: "${SLACK_CHANNEL}", color: '#FF0000', message: "FAILURE: Le pipeline ${BUILD_NUMBER} de ${JOB_NAME} a échoué. Vérifiez les outils de scan ou l'infrastructure : ${BUILD_URL}"
+            archiveArtifacts artifacts: 'trivy-*-report.txt', allowEmptyArchive: true
         }
     }
 }
-
