@@ -6,20 +6,9 @@ pipeline {
 	jdk 'jdk17'
     }	    
     environment {
-        // Outils & Serveurs
-        SCANNER_HOME = tool 'SonarQubeScanner'
-        NEXUS_URL = '192.168.1.50:8081' 
-        DOCKER_REGISTRY = '192.168.1.50:8082' // Port du registre Docker Nexus
-        CREDENTIALS_ID = 'nexus-credentials'
-        
-        // Application & Docker
-        IMAGE_NAME = 'my-app'
+        DOCKER_IMAGE = 'boardgame'
         IMAGE_TAG = "${BUILD_NUMBER}"
-        FULL_IMAGE_PATH = "${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-        
-        // Notifications
-        NOTIF_EMAIL = 'devops-team@example.com'
-        SLACK_CHANNEL = '#alerts-devsecops'
+        NEXUS_REGISTRY = '192.168.176.128:8082'
     }
 
     stages {
