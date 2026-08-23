@@ -41,9 +41,11 @@ pipeline {
             steps {
                 // Analyse ultra-rapide des dépendances (pom.xml) et des secrets.
                 // Le pipeline s'arrête NET ici en cas de faille HIGH ou CRITICAL.
-                sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL ."
-            }
-        }
+		timeout(time: 15, unit:'MINUTE'){
+                      sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL ."
+            	}
+	    }	        
+	 }
 
         stage('4. SonarQube Analysis') {
             steps {
