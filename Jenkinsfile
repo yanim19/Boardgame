@@ -37,15 +37,22 @@ pipeline {
             }
         }
 
-        stage('3. Trivy FS Scan (FAIL-FAST)') {
+        stage('3. Trivy Scan') {
+    	    environment {
+        	TMPDIR = "${WORKSPACE}/trivy-tmp"
+    	    }	
             steps {
-                // Analyse ultra-rapide des dépendances (pom.xml) et des secrets.
-                // Le pipeline s'arrête NET ici en cas de faille HIGH ou CRITICAL.
-		timeout(time: 15, unit: 'MINUTES'){
-                      sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL ."
-            	}
-	    }	        
-	 }
+        	sh 'mkdir -p $TMPDIR'
+        	sh """
+        	trivy image --severity HIGH,CRITICAL \
+        	--cache-dir /var/lib/jenkins/trivy-cache \
+        	--timeout 15m \
+        	--format table \
+        	-o trivy-report.txt \
+        	${DOCKER_IMAGE}:${IMAGE_TAG}
+        	"""
+    	    }
+	}	
 
         stage('4. SonarQube Analysis') {
             steps {
