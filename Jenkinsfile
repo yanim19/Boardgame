@@ -1,6 +1,9 @@
 pipeline {
     agent any
-    
+
+    tools{
+	maven 'maven3'
+    }	    
     environment {
         // Outils & Serveurs
         SCANNER_HOME = tool 'SonarQubeScanner'
