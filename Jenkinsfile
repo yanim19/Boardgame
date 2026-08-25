@@ -20,11 +20,10 @@ pipeline {
             }
         }
 
-        stage('2. Maven Build') {
+        stage('2. Maven Compile & Test') {
             steps {
                 sh 'mvn compile'
                 sh 'mvn test'
-                sh 'mvn package'
             }
         }
 
@@ -63,7 +62,13 @@ pipeline {
             }
         }
 
-        stage('6. Nexus Repo Push') {
+        stage('6. Docker Build') {
+            steps {
+                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('7. Push to Nexus') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
@@ -72,12 +77,6 @@ pipeline {
                     docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
                     """
                 }
-            }
-        }
-
-        stage('7. Docker Build') {
-            steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
             }
         }
 
@@ -93,12 +92,12 @@ pipeline {
                 --timeout 15m \
                 --format table \
                 -o trivy-image-report.txt \
-                ${DOCKER_IMAGE}:${IMAGE_TAG}
+                ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
                 """
             }
         }
 
-        stage('9. Docker Tag') {
+        stage('9. Docker Tag Latest') {
             steps {
                 sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
             }
