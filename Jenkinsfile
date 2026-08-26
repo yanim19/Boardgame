@@ -109,4 +109,5 @@ pipeline {
                 echo "Publish to Docker Hub is completed."
             }
         }
+   }
 }
