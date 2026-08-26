@@ -1,21 +1,22 @@
 pipeline {
     agent any
-    
+
     tools {
         jdk 'jdk17'
         maven 'maven3'
     }
-    
+
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = 'maven-devsecops'
+        DOCKER_IMAGE = 'boardgame'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        NEXUS_REGISTRY = '192.168.176.128:8082'
     }
 
     stages {
 
         stage('Git Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/abhradippaul/Boardgame.git'
+                checkout scm
                 echo "Git Checkout completed successfully."
             }
         }
@@ -35,20 +36,31 @@ pipeline {
         }
 
         stage('File System Scan') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
             steps {
-                sh "docker run --rm -v /data/trivy/fs:/data -v /var/run/docker.sock:/var/run/docker.sock -v ~/.cache:/root/.cache --name trivy aquasec/trivy fs --format table -o /data/BoardGame.html ."
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy fs --severity HIGH,CRITICAL \
+                --cache-dir /var/lib/jenkins/trivy-cache \
+                --timeout 30m \
+                --format table \
+                -o trivy-fs-report.txt \
+                .
+                """
                 echo 'File System Scan Completed'
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv("sonar-scanner") {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner \
-                    -Dsonar.projectKey=BoardGame \
-                    -Dsonar.projectName=BoardGame \
-                    -Dsonar.java.binaries=. 
-                '''
+                withSonarQubeEnv("SonarQube") {
+                    sh '''
+                    mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar \
+                      -Dsonar.projectKey=Boardgame \
+                      -Dsonar.projectName=Boardgame
+                    '''
                 }
                 echo 'SonarQube Analysis Completed'
             }
@@ -56,13 +68,10 @@ pipeline {
 
         stage("Quality Gate") {
             steps {
-                script {
-                    def qg = waitForQualityGate()
-                    if (qg.status != 'OK') {
-                        error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                    }
-                    echo "Quality gate passed successfully"
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
+                echo "Quality gate passed successfully"
             }
         }
 
@@ -72,42 +81,49 @@ pipeline {
                 echo "Maven build successfully"
             }
         }
-        
-        stage('Publish to Nexus') {
+
+        stage('Docker Build') {
             steps {
-              withMaven(globalMavenSettingsConfig: 'global-settings', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                    sh "mvn deploy"
-                }
-                echo "Publish to nexus is completed."
+                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                echo "Docker Image build completed."
             }
         }
-        
-        stage('Login to DockerHub and Build Image') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'jenkins-docker', passwordVariable: 'password', usernameVariable: 'username')]) {
-                    sh "docker build -t ${username}/${DOCKER_IMAGE}:${params.BUILD_NUMBER} ."
-                    sh "docker login -u ${username} -p ${password}"
-                }
-                echo "Docker Image build and Docker Hub login completed."
-            }
-        }
-        
+
         stage('Scan Docker Image') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'jenkins-docker', passwordVariable: 'password', usernameVariable: 'username')]) {
-                    sh "docker run --rm -v /data/trivy/image:/data -v /var/run/docker.sock:/var/run/docker.sock -v ~/.cache:/root/.cache --name trivy aquasec/trivy image --format json --output /data/BoardGame.json ${username}/${DOCKER_IMAGE}:${params.BUILD_NUMBER}"
-                }
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy image --severity HIGH,CRITICAL \
+                --cache-dir /var/lib/jenkins/trivy-cache \
+                --timeout 30m \
+                --format table \
+                -o trivy-image-report.txt \
+                ${DOCKER_IMAGE}:${IMAGE_TAG}
+                """
                 echo "Scan Docker Image completed."
             }
         }
-        
-        stage('Publish to DockerHub') {
+
+        stage('Publish to Nexus') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'jenkins-docker', passwordVariable: 'password', usernameVariable: 'username')]) {
-                    sh "docker push ${username}/${DOCKER_IMAGE}:${params.BUILD_NUMBER}"
+                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    echo \$NEXUS_PASS | docker login ${NEXUS_REGISTRY} -u \$NEXUS_USER --password-stdin
+                    docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    """
                 }
-                echo "Publish to Docker Hub is completed."
+                echo "Publish to Nexus is completed."
             }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'trivy-*-report.txt', allowEmptyArchive: true
         }
     }
 }
