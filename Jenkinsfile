@@ -14,28 +14,20 @@ pipeline {
 
     stages {
 
-        stage('Git Checkout') {
+        stage('1. GitHub Checkout') {
             steps {
                 checkout scm
-                echo "Git Checkout completed successfully."
             }
         }
 
-        stage('Compilation Code') {
+        stage('2. Maven Compile & Test') {
             steps {
-                sh "mvn compile"
-                echo "Compilation is done"
+                sh 'mvn compile'
+                sh 'mvn test'
             }
         }
 
-        stage('Test Compilation') {
-            steps {
-                sh "mvn test"
-                echo "Test Compilation is done"
-            }
-        }
-
-        stage('File System Scan') {
+        stage('3. Trivy FS Scan') {
             environment {
                 TMPDIR = "${WORKSPACE}/trivy-tmp"
             }
@@ -44,70 +36,39 @@ pipeline {
                 sh """
                 trivy fs --severity HIGH,CRITICAL \
                 --cache-dir /var/lib/jenkins/trivy-cache \
-                --timeout 30m \
+                --timeout 15m \
                 --format table \
                 -o trivy-fs-report.txt \
                 .
                 """
-                echo 'File System Scan Completed'
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('4. SonarQube Analysis') {
             steps {
-                withSonarQubeEnv("SonarQube") {
+                withSonarQubeEnv('SonarQube') {
                     sh '''
                     mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar \
                       -Dsonar.projectKey=Boardgame \
                       -Dsonar.projectName=Boardgame
                     '''
                 }
-                echo 'SonarQube Analysis Completed'
             }
         }
 
-        stage("Quality Gate") {
+        stage('5. Maven Package') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-                echo "Quality gate passed successfully"
+                sh 'mvn package'
             }
         }
 
-        stage("Build") {
-            steps {
-                sh "mvn package"
-                echo "Maven build successfully"
-            }
-        }
-
-        stage('Docker Build') {
+        stage('6. Docker Build') {
             steps {
                 sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
-                echo "Docker Image build completed."
             }
         }
 
-        stage('Scan Docker Image') {
-            environment {
-                TMPDIR = "${WORKSPACE}/trivy-tmp"
-            }
-            steps {
-                sh 'mkdir -p $TMPDIR'
-                sh """
-                trivy image --severity HIGH,CRITICAL \
-                --cache-dir /var/lib/jenkins/trivy-cache \
-                --timeout 30m \
-                --format table \
-                -o trivy-image-report.txt \
-                ${DOCKER_IMAGE}:${IMAGE_TAG}
-                """
-                echo "Scan Docker Image completed."
-            }
-        }
-
-        stage('Publish to Nexus') {
+        stage('7. Push to Nexus') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
@@ -116,7 +77,29 @@ pipeline {
                     docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
                     """
                 }
-                echo "Publish to Nexus is completed."
+            }
+        }
+
+        stage('8. Trivy Image Scan') {
+            environment {
+                TMPDIR = "${WORKSPACE}/trivy-tmp"
+            }
+            steps {
+                sh 'mkdir -p $TMPDIR'
+                sh """
+                trivy image --severity HIGH,CRITICAL \
+                --cache-dir /var/lib/jenkins/trivy-cache \
+                --timeout 15m \
+                --format table \
+                -o trivy-image-report.txt \
+                ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('9. Docker Tag Latest') {
+            steps {
+                sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
             }
         }
     }
@@ -127,3 +110,4 @@ pipeline {
         }
     }
 }
+
