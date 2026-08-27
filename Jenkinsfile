@@ -89,7 +89,7 @@ pipeline {
                 sh """
                 trivy image --severity HIGH,CRITICAL \
                 --cache-dir /var/lib/jenkins/trivy-cache \
-                --timeout 15m \
+                --timeout 30m \
                 --format table \
                 -o trivy-image-report.txt \
                 ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
