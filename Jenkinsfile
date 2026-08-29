@@ -9,25 +9,33 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'boardgame'
         IMAGE_TAG = "${BUILD_NUMBER}"
-        NEXUS_REGISTRY = '192.168.176.128:8082'
+        DOCKERHUB_USER = 'yanim19'
     }
 
     stages {
 
-        stage('1. GitHub Checkout') {
+        stage('Git Checkout') {
             steps {
                 checkout scm
+                echo "Git Checkout completed successfully."
             }
         }
 
-        stage('2. Maven Compile & Test') {
+        stage('Compilation Code') {
             steps {
-                sh 'mvn compile'
-                sh 'mvn test'
+                sh "mvn compile"
+                echo "Compilation is done"
             }
         }
 
-        stage('3. Trivy FS Scan') {
+        stage('Test Compilation') {
+            steps {
+                sh "mvn test"
+                echo "Test Compilation is done"
+            }
+        }
+
+        stage('File System Scan') {
             environment {
                 TMPDIR = "${WORKSPACE}/trivy-tmp"
             }
@@ -36,51 +44,64 @@ pipeline {
                 sh """
                 trivy fs --severity HIGH,CRITICAL \
                 --cache-dir /var/lib/jenkins/trivy-cache \
-                --timeout 15m \
+                --timeout 30m \
                 --format table \
                 -o trivy-fs-report.txt \
                 .
                 """
+                echo 'File System Scan Completed'
             }
         }
 
-        stage('4. SonarQube Analysis') {
+        stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube') {
+                withSonarQubeEnv("SonarQube") {
                     sh '''
                     mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar \
                       -Dsonar.projectKey=Boardgame \
                       -Dsonar.projectName=Boardgame
                     '''
                 }
+                echo 'SonarQube Analysis Completed'
             }
         }
 
-        stage('5. Maven Package') {
+        stage("Quality Gate") {
             steps {
-                sh 'mvn package'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+                echo "Quality gate passed successfully"
             }
         }
 
-        stage('6. Docker Build') {
+        stage("Maven Package") {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                sh "mvn package"
+                echo "Maven build successfully"
             }
         }
 
-        stage('7. Push to Nexus') {
+        stage('Docker Build') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                sh "docker build -t ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                echo "Docker Image build completed."
+            }
+        }
+
+        stage('Publish to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh """
-                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
-                    echo \$NEXUS_PASS | docker login ${NEXUS_REGISTRY} -u \$NEXUS_USER --password-stdin
-                    docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
+                    docker push ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG}
                     """
                 }
+                echo "Publish to DockerHub is completed."
             }
         }
 
-        stage('8. Trivy Image Scan') {
+        stage('Scan Docker Image') {
             environment {
                 TMPDIR = "${WORKSPACE}/trivy-tmp"
             }
@@ -92,14 +113,9 @@ pipeline {
                 --timeout 30m \
                 --format table \
                 -o trivy-image-report.txt \
-                ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG}
                 """
-            }
-        }
-
-        stage('9. Docker Tag Latest') {
-            steps {
-                sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
+                echo "Scan Docker Image completed."
             }
         }
     }
@@ -110,4 +126,3 @@ pipeline {
         }
     }
 }
-
