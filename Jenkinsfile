@@ -94,8 +94,10 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
                     docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:latest
                     echo \$NEXUS_PASS | docker login ${NEXUS_REGISTRY} -u \$NEXUS_USER --password-stdin
                     docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:latest
                     """
                 }
                 echo "Publish to Nexus is completed."
@@ -119,6 +121,15 @@ pipeline {
                 echo "Scan Docker Image completed."
             }
         }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh "kubectl apply -f deployment.yaml"
+                sh "kubectl apply -f service.yaml"
+                sh "kubectl rollout status deployment/boardgame-deployment"
+                echo "Deployment to Kubernetes completed."
+            }
+        }
     }
 
     post {
@@ -127,3 +138,4 @@ pipeline {
         }
     }
 }
+
