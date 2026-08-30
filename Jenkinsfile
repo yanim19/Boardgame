@@ -9,7 +9,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'boardgame'
         IMAGE_TAG = "${BUILD_NUMBER}"
-        DOCKERHUB_USER = 'yanim19'
+        NEXUS_REGISTRY = '192.168.176.128:8082'
     }
 
     stages {
@@ -84,20 +84,21 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                sh "docker build -t ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
                 echo "Docker Image build completed."
             }
         }
 
-        stage('Publish to DockerHub') {
+        stage('Publish to Nexus') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
-                    echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
-                    docker push ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                    echo \$NEXUS_PASS | docker login ${NEXUS_REGISTRY} -u \$NEXUS_USER --password-stdin
+                    docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}:${IMAGE_TAG}
                     """
                 }
-                echo "Publish to DockerHub is completed."
+                echo "Publish to Nexus is completed."
             }
         }
 
@@ -113,7 +114,7 @@ pipeline {
                 --timeout 30m \
                 --format table \
                 -o trivy-image-report.txt \
-                ${DOCKERHUB_USER}/${DOCKER_IMAGE}:${IMAGE_TAG}
+                ${DOCKER_IMAGE}:${IMAGE_TAG}
                 """
                 echo "Scan Docker Image completed."
             }
