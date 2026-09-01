@@ -133,9 +133,25 @@ pipeline {
     }
 
     post {
-        always {
-            archiveArtifacts artifacts: 'trivy-*-report.txt', allowEmptyArchive: true
-        }
+    	always {
+        	archiveArtifacts artifacts: 'trivy-*-report.txt', allowEmptyArchive: true
+    	}
+    	failure {
+        	mail to: 'TON_EMAIL@gmail.com',
+             	subject: "ÉCHEC Pipeline Jenkins : ${JOB_NAME} - Build #${BUILD_NUMBER}",
+             	body: """
+             	Le pipeline a échoué.
+             
+             	Job: ${JOB_NAME}
+             	Build: #${BUILD_NUMBER}
+             	Voir les détails: ${BUILD_URL}console
+             	"""
+    	}
+    	success {
+        	mail to: 'ranimgouissem657@gmail.com',
+             	subject: "SUCCÈS Pipeline Jenkins : ${JOB_NAME} - Build #${BUILD_NUMBER}",
+             	body: "Le pipeline s'est terminé avec succès ! Voir: ${BUILD_URL}"
+    	}
     }
 }
 
