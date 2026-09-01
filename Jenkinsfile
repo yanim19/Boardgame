@@ -44,7 +44,7 @@ pipeline {
                 sh """
                 trivy fs --severity HIGH,CRITICAL \
                 --cache-dir /var/lib/jenkins/trivy-cache \
-                --timeout 30m \
+                --timeout 60m \
                 --format table \
                 -o trivy-fs-report.txt \
                 .
